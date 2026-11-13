@@ -15,7 +15,7 @@ dbt deps --profiles-dir .
 dbt build --profiles-dir .         # transforms and tests
 ```
 
-Put `payments.csv`, `receipts.csv`, and `disbursements.csv` in `data/raw/`. They are gitignored. Copy `profiles.example.yml` to `profiles.yml` if you do not already have one.
+Put `payments.csv`, `receipts.csv`, and `disbursements.csv` in `data/raw/` (from the assignment data link; not in this repo). They are gitignored. Copy `profiles.example.yml` to `profiles.yml` if you do not already have one.
 
 Two steps, on purpose. dbt transforms; it does not ingest. The loader writes `raw.payments`, `raw.receipts` and `raw.disbursements`, and dbt reads them as sources.
 
