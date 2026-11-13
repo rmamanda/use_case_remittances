@@ -9,8 +9,9 @@ A remittance is a receipt: it carries the amount the customer was charged and po
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
 pip install -r requirements.txt
-python3 scripts/load_raw.py        # writes the raw schema
+python scripts/load_raw.py         # writes the raw schema
 dbt deps --profiles-dir .
 dbt build --profiles-dir .         # transforms and tests
 ```
