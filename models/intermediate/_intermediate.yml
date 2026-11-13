@@ -1,0 +1,117 @@
+version: 2
+
+models:
+  - name: int_remittances
+    description: >-
+      One row per receipt, with its payment and its payout joined on. The remittance:
+      what was sent. Marts aggregate this; they do not join it again.
+    columns:
+      - name: receipt_id
+        data_type: varchar
+        description: Primary key. One receipt is one remittance.
+        tests: [not_null, unique]
+      - name: payment_id
+        data_type: varchar
+        description: Repeats when a payment was split across several receipts.
+        tests: [not_null]
+      - name: disbursement_id
+        data_type: varchar
+      - name: sender_user_id
+        data_type: varchar
+      - name: beneficiary_id
+        data_type: varchar
+      - name: destination_country_code
+        data_type: varchar
+      - name: destination_currency
+        data_type: varchar
+      - name: amount_charged
+        data_type: decimal(18,2)
+      - name: fee
+        data_type: decimal(18,2)
+      - name: exchange_rate
+        data_type: decimal(18,6)
+      - name: promotion_amount
+        data_type: decimal(18,2)
+      - name: destination_amount
+        data_type: decimal(18,2)
+      - name: remittance_created_at
+        data_type: timestamp with time zone
+      - name: remittance_month
+        data_type: timestamp
+        description: Cut in UTC, so the totals do not move with the server timezone.
+      - name: payment_amount
+        data_type: decimal(18,4)
+      - name: payment_currency
+        data_type: varchar
+      - name: payment_status
+        data_type: varchar
+      - name: payment_type
+        data_type: varchar
+      - name: has_dispute_chargeback
+        data_type: boolean
+      - name: disbursement_provider
+        data_type: varchar
+      - name: payout_destination_name
+        data_type: varchar
+      - name: disbursement_status
+        data_type: varchar
+      - name: disbursement_outcome
+        data_type: varchar
+      - name: disbursement_amount
+        data_type: decimal(18,2)
+      - name: disbursement_destination_country
+        data_type: varchar
+      - name: is_completed_remittance
+        data_type: boolean
+        description: Payment went through and the payout landed. Both sides come from vars. Never null.
+        tests: [not_null]
+      - name: is_successful_payment
+        data_type: boolean
+        description: Payment side only. The payment join is inner, so this is never null.
+        tests: [not_null]
+      - name: is_failed_disbursement
+        data_type: boolean
+        description: False, not null, when the receipt has no payout in the file.
+        tests: [not_null]
+
+  - name: int_payments
+    description: >-
+      One row per payment, with its receipts rolled up. The charge: what we collected.
+      A successful payment that never produced a receipt shows up here with
+      receipt_count 0, and is absent from int_remittances entirely.
+    columns:
+      - name: payment_id
+        data_type: varchar
+        description: Primary key.
+        tests: [not_null, unique]
+      - name: sender_user_id
+        data_type: varchar
+      - name: payment_amount
+        data_type: decimal(18,4)
+      - name: payment_currency
+        data_type: varchar
+      - name: payment_status
+        data_type: varchar
+      - name: detailed_status
+        data_type: varchar
+      - name: payment_type
+        data_type: varchar
+      - name: has_dispute_chargeback
+        data_type: boolean
+      - name: payment_created_at
+        data_type: timestamp with time zone
+      - name: payment_month
+        data_type: timestamp
+        description: Cut from the payment's own created_at, in UTC.
+        tests: [not_null]
+      - name: receipt_count
+        data_type: bigint
+        description: Zero when the payment never produced a receipt.
+        tests: [not_null]
+      - name: receipts_amount_charged
+        data_type: decimal(38,2)
+        description: What the receipts booked against this charge. Null when there are none.
+      - name: is_successful_payment
+        data_type: boolean
+        description: Never null, because status is tested not_null upstream.
+        tests: [not_null]

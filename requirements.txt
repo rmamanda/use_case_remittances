@@ -1,0 +1,4 @@
+# Tested combination. dbt-core is pinned too: the project uses unit tests and the
+# `arguments:` test syntax, which older cores do not parse.
+dbt-core==1.12.7
+dbt-duckdb==1.11.1

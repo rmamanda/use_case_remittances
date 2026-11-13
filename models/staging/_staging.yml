@@ -1,0 +1,115 @@
+version: 2
+
+models:
+  - name: stg_payments
+    description: >-
+      One payment per row: what we charged the customer. A payment can carry more than
+      one receipt, so this is not the remittance book. Sum it when you want money taken
+      from the customer, not when you want volume sent.
+    columns:
+      - name: payment_id
+        tests: [not_null, unique]
+      - name: amount
+        description: >-
+          What we charged. Can be zero or negative. Not used by any mart,
+          which reads amount_charged off the receipt instead.
+      - name: sender_user_id
+        tests: [not_null]
+      - name: status
+        description: Uppercased. The accepted values list fails the build if the backend adds a new one.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["SUCCESSFUL", "FAILED", "REFUNDED", "PENDING_USER_ACTION", "STARTED"]
+      - name: has_dispute_chargeback
+        description: True when the customer disputed the charge.
+        tests: [not_null]
+
+  - name: stg_receipts
+    description: >-
+      One receipt per row. The receipt is the remittance: it holds the amount charged and
+      points at both the payment and the payout.
+    columns:
+      - name: receipt_id
+        tests: [not_null, unique]
+      - name: payment_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments')
+                field: payment_id
+      - name: disbursement_id
+        description: >-
+          Some receipts point at a payout that is not in the export. The relationship
+          test warns rather than failing, so the receipt is kept and the offending rows
+          land in dbt_test__audit.
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('stg_disbursements')
+                field: disbursement_id
+              config:
+                severity: warn
+      - name: amount_charged
+        description: >-
+          What the customer was charged, in the sending currency. Some rows are zero,
+          and the occasional negative reads like a reversal. They are kept: the book
+          should match the source, and dropping rows is the business's call, not the
+          warehouse's. The test below keeps the count in sight and fails if it grows.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "> 0"
+              config:
+                severity: warn
+                error_if: ">3100"
+
+  - name: stg_disbursements
+    description: >-
+      One payout per row. The provider status strings are a mess, so disbursement_outcome
+      buckets them into something you can group by.
+    columns:
+      - name: disbursement_id
+        tests: [not_null, unique]
+      - name: disbursement_outcome
+        description: >-
+          SUCCESS, FAILED, CANCELLED or OTHER. A cancel is not a failure; OTHER is still
+          in flight. mart_provider_disbursement_failures explains why that matters.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["SUCCESS", "FAILED", "CANCELLED", "OTHER"]
+
+unit_tests:
+  - name: outcome_buckets_the_messy_provider_statuses
+    description: >-
+      The bucket decides the failure rate, so it is pinned here. A cancel is not a
+      failure and anything still moving is OTHER.
+    model: stg_disbursements
+    given:
+      - input: source('remittances', 'disbursements')
+        format: csv
+        rows: |
+          id,user_id,type,status,raw_status,provider_status,amount,disbursement_provider,payer_destination_name,destination_country,destination_currency,created_at,updated_at,_source_file,_loaded_at
+          d1,u1,BANK,PAID,PAID,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+          d2,u1,BANK,WIRE_CONFIRMED,WIRE_CONFIRMED,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+          d3,u1,BANK,FAILED,FAILED,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+          d4,u1,BANK,ERROR_SENDING_PAYOUT_REQUEST,ERROR,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+          d5,u1,BANK,CANCELLED,CANCELLED,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+          d6,u1,BANK,PAYABLE,PAYABLE,,10.00,P1,DEST,MX,MXN,2026-01-01 00:00:00+00:00,2026-01-01 00:00:00+00:00,f.csv,2026-01-01 00:00:00+00:00
+    expect:
+      format: csv
+      rows: |
+        disbursement_id,disbursement_outcome
+        d1,SUCCESS
+        d2,SUCCESS
+        d3,FAILED
+        d4,FAILED
+        d5,CANCELLED
+        d6,OTHER

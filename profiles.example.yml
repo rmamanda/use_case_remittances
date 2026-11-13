@@ -1,0 +1,8 @@
+# Copy to profiles.yml (or ~/.dbt/profiles.yml) and adjust paths if needed.
+use_case_remittances:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: data/warehouse.duckdb
+      threads: 4

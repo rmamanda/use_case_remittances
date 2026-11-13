@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: remittances
+    description: >-
+      The three backend extracts, written into the raw schema by scripts/load_raw.py.
+      Everything is text here; casting happens in staging.
+    schema: raw
+    loaded_at_field: _loaded_at
+    freshness:
+      warn_after: {count: 24, period: hour}
+    tables:
+      - name: payments
+        columns:
+          - name: id
+            description: >-
+              Tested on the source and not only in staging. This is the layer where a
+              duplicate could actually turn up, and at_least_one is what catches a file
+              that loaded empty: zero rows satisfy every other assertion in the project.
+            tests: [not_null, unique, dbt_utils.at_least_one]
+      - name: receipts
+        description: Ties a payment to a payout.
+        columns:
+          - name: id
+            tests: [not_null, unique, dbt_utils.at_least_one]
+      - name: disbursements
+        columns:
+          - name: id
+            tests: [not_null, unique, dbt_utils.at_least_one]

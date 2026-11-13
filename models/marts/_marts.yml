@@ -1,0 +1,239 @@
+version: 2
+
+models:
+  - name: mart_monthly_transaction_volume
+    description: >-
+      Volume by month on successful payments. This is booked value, not cash collected:
+      the grain is the receipt, because the receipt is the remittance.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "total_amount_charged >= 0"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "completed_amount_charged <= total_amount_charged"
+    columns:
+      - name: transaction_month
+        data_type: timestamp
+        description: Cut in UTC.
+        tests: [not_null, unique]
+      - name: remittance_count
+        data_type: bigint
+        description: Receipts, not payments.
+      - name: active_senders
+        data_type: bigint
+      - name: total_amount_charged
+        data_type: decimal(38,2)
+      - name: completed_amount_charged
+        data_type: decimal(38,2)
+        description: The slice of the above whose payout also landed.
+      - name: completed_remittance_count
+        data_type: hugeint
+
+  - name: mart_users_top_half_volume
+    description: >-
+      Every sender with a completed remittance, ranked by volume, with a flag on the ones
+      that make up the first half of it. The sender who crosses the line is included.
+    columns:
+      - name: sender_user_id
+        data_type: varchar
+        tests: [not_null, unique]
+      - name: total_amount_charged
+        data_type: decimal(38,2)
+      - name: remittance_count
+        data_type: bigint
+      - name: volume_rank
+        data_type: bigint
+        description: 1 is the largest sender. Ties break on sender_user_id, so the rank is stable.
+      - name: cumulative_volume
+        data_type: decimal(38,2)
+      - name: platform_total_volume
+        data_type: decimal(38,2)
+      - name: share_of_total_volume
+        data_type: double
+        description: >-
+          Running share of completed volume at this rank. It tips just over 1 in the tail
+          and comes back: a sender with negative completed volume makes the running sum
+          overshoot the total before their row subtracts it again. A singular
+          test checks that it lands on the fact's own total at the last rank.
+      - name: in_top_half_volume
+        data_type: boolean
+        description: >-
+          A unit test pins the boundary: the sender who straddles the line is in.
+        tests: [not_null]
+
+  - name: mart_recurring_customers
+    description: >-
+      Every sender with a completed remittance, flagged as recurring at 3 remittances
+      across 2 different months. Both numbers are vars. Filter on the flag; the table
+      is the whole base.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "is_recurring_customer = (completed_remittances >= {{ var('recurring_min_remittances') }} and months_active >= {{ var('recurring_min_months') }})"
+    columns:
+      - name: sender_user_id
+        data_type: varchar
+        tests: [not_null, unique]
+      - name: completed_remittances
+        data_type: hugeint
+      - name: months_active
+        data_type: bigint
+        description: Distinct calendar months, not a span.
+      - name: is_recurring_customer
+        data_type: boolean
+
+  - name: mart_provider_disbursement_failures
+    description: >-
+      Providers ranked by failed payouts. Cancels are counted but kept out of the rate,
+      because a cancel is not a payout error and counting it would reorder the ranking.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "failure_rate >= 0 and failure_rate <= 1"
+    columns:
+      - name: disbursement_provider
+        data_type: varchar
+        tests: [not_null, unique]
+      - name: attempts
+        data_type: bigint
+        description: A singular test checks this covers every payout in the file.
+      - name: failed
+        data_type: bigint
+      - name: cancelled
+        data_type: bigint
+        description: Counted, deliberately not in failure_rate.
+      - name: succeeded
+        data_type: bigint
+      - name: failure_rate
+        data_type: double
+
+  - name: mart_beneficiary_sender_clusters
+    description: >-
+      Senders grouped by the beneficiary they send to, over every remittance in the
+      file. Whether the payout landed is not part of the question, so it is not part of
+      the filter. Several senders on one beneficiary is the shape fraud review looks for,
+      and also what a shared family account looks like, so this flags rather than concludes. The mart is here so the answer to the brief is on the record, whether
+      or not anything clusters.
+    columns:
+      - name: beneficiary_id
+        data_type: varchar
+        tests: [not_null, unique]
+      - name: sender_count
+        data_type: bigint
+      - name: sender_ids
+        data_type: varchar[]
+        description: >-
+          Who the senders are, filled in only when there are two or more. A cluster mart
+          that tells you a group has three members without naming them is half an answer,
+          and a one-element list on every other row is bytes spent saying nothing.
+      - name: remittance_count
+        data_type: hugeint
+        description: Every remittance to this beneficiary, delivered or not.
+      - name: completed_remittance_count
+        data_type: hugeint
+      - name: total_amount_charged
+        data_type: decimal(38,2)
+      - name: completed_amount_charged
+        data_type: decimal(38,2)
+        description: The slice of the above whose payout landed. This is the business number.
+      - name: multiple_senders
+        data_type: boolean
+        description: >-
+          True when a beneficiary takes money from more than one sender. A singular test
+          checks this across the whole file.
+
+  - name: mart_shared_payout_destinations
+    description: >-
+      The cut that does cluster. payer_destination_name behaves like a payout corridor
+      rather than a person, and a single label can be shared by a great many senders.
+      Separate from
+      the mart above so nobody reads it as the answer to the brief. Same population rule
+      as that mart: every remittance, delivered or not.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - payout_destination_name
+              - disbursement_destination_country
+    columns:
+      - name: payout_destination_name
+        data_type: varchar
+        tests: [not_null]
+      - name: disbursement_destination_country
+        data_type: varchar
+      - name: sender_count
+        data_type: bigint
+        description: >-
+          No sender_ids here, unlike the cluster mart: these groups get large enough
+          that the list would be unreadable.
+      - name: remittance_count
+        data_type: hugeint
+      - name: completed_remittance_count
+        data_type: hugeint
+      - name: total_amount_charged
+        data_type: decimal(38,2)
+      - name: completed_amount_charged
+        data_type: decimal(38,2)
+      - name: multiple_senders
+        data_type: boolean
+
+  - name: mart_chargeback_rate
+    description: >-
+      Disputed payments over successful payments, by month, off the payment fact. The
+      month is the payment's own, not the receipt's.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "chargeback_rate >= 0 and chargeback_rate <= 1"
+    columns:
+      - name: transaction_month
+        data_type: timestamp
+        tests: [not_null, unique]
+      - name: successful_payments
+        data_type: bigint
+      - name: chargeback_payments
+        data_type: bigint
+      - name: chargeback_rate
+        data_type: double
+
+unit_tests:
+  - name: top_half_includes_the_sender_who_crosses_the_line
+    description: >-
+      40 + 30 + 30. Half is 50, so the second sender straddles it and has to be in.
+      Off by one here and the headline number moves.
+    model: mart_users_top_half_volume
+    given:
+      - input: ref('int_remittances')
+        rows:
+          - {sender_user_id: "a", amount_charged: 40, is_completed_remittance: true}
+          - {sender_user_id: "b", amount_charged: 30, is_completed_remittance: true}
+          - {sender_user_id: "c", amount_charged: 30, is_completed_remittance: true}
+          - {sender_user_id: "d", amount_charged: 99, is_completed_remittance: false}
+    expect:
+      rows:
+        - {sender_user_id: "a", volume_rank: 1, in_top_half_volume: true}
+        - {sender_user_id: "b", volume_rank: 2, in_top_half_volume: true}
+        - {sender_user_id: "c", volume_rank: 3, in_top_half_volume: false}
+
+  - name: recurring_needs_both_the_count_and_the_spread
+    description: >-
+      Three remittances in one month is not recurring, and two across two months is not
+      either. Both thresholds have to bite.
+    model: mart_recurring_customers
+    given:
+      - input: ref('int_remittances')
+        rows:
+          - {sender_user_id: "r1", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r1", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r1", remittance_month: "2026-02-01", is_completed_remittance: true}
+          - {sender_user_id: "r2", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r2", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r2", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r3", remittance_month: "2026-01-01", is_completed_remittance: true}
+          - {sender_user_id: "r3", remittance_month: "2026-02-01", is_completed_remittance: true}
+    expect:
+      rows:
+        - {sender_user_id: "r1", completed_remittances: 3, months_active: 2, is_recurring_customer: true}
+        - {sender_user_id: "r2", completed_remittances: 3, months_active: 1, is_recurring_customer: false}
+        - {sender_user_id: "r3", completed_remittances: 2, months_active: 2, is_recurring_customer: false}
