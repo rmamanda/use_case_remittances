@@ -1,4 +1,5 @@
-# Tested combination. dbt-core is pinned too: the project uses unit tests and the
-# `arguments:` test syntax, which older cores do not parse.
-dbt-core==1.12.7
+# Tested on Python 3.11–3.13. dbt 1.12 pulls dbt-core-experimental-parser (source-only
+# on PyPI; often fails without Rust/maturin on Intel Mac). 1.11.5 avoids that build
+# and still runs this project's unit tests and contracts.
+dbt-core==1.11.5
 dbt-duckdb==1.11.1

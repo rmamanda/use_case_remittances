@@ -2,7 +2,7 @@ name: use_case_remittances
 version: "1.0.0"
 config-version: 2
 profile: use_case_remittances
-require-dbt-version: [">=1.12.0", "<2.0.0"]
+require-dbt-version: [">=1.11.0", "<2.0.0"]
 
 model-paths: ["models"]
 test-paths: ["tests"]
